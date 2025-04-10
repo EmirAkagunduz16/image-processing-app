@@ -61,6 +61,10 @@ class ImageProcessor:
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
+        # Original image label
+        self.original_label = ttk.Label(self.main_frame)
+        self.original_label.grid(row=0, column=0, pady=10)
+        
         # Processed frame
         self.processed_frame = ttk.Frame(self.processed_window, padding="10")
         self.processed_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -116,10 +120,7 @@ class ImageProcessor:
         ttk.Button(self.threshold_frame, text="Uygula", 
                   command=lambda: self.manual_threshold(self.threshold_scale.get())).grid(row=0, column=4, padx=5)
         
-        # Image display
-        self.original_label = ttk.Label(self.main_frame)
-        self.original_label.grid(row=3, column=0, pady=10)
-        
+        # Processed image label
         self.processed_label = ttk.Label(self.processed_frame)
         self.processed_label.grid(row=0, column=0, pady=10)
 
@@ -280,12 +281,39 @@ class ImageProcessor:
             messagebox.showerror("Hata", "Lütfen önce bir görüntü yükleyin!")
             return
         
+        # Store current image histogram before equalization
+        current_hists = CustomImageProcessing.calculate_histogram(self.current_image)
+        
+        # Apply histogram equalization
         self.processed_image = CustomImageProcessing.histogram_equalization(self.current_image)
         self.current_image = self.processed_image.copy()
         self.display_image()
         
-        # Show histograms
-        self.show_histogram()
+        # Create figure with two subplots side by side
+        plt.figure(figsize=(12,5))
+        
+        # Current image histogram (before equalization)
+        plt.subplot(121)
+        color = ('b','g','r')
+        for i, (hist, col) in enumerate(zip(current_hists, color)):
+            plt.plot(hist, color=col)
+        plt.title('Mevcut Görüntü Histogramı')
+        plt.xlabel('Piksel Değeri')
+        plt.ylabel('Piksel Sayısı')
+        plt.grid(True)
+        
+        # Equalized histogram
+        plt.subplot(122)
+        equalized_hists = CustomImageProcessing.calculate_histogram(self.processed_image)
+        for i, (hist, col) in enumerate(zip(equalized_hists, color)):
+            plt.plot(hist, color=col)
+        plt.title('Eşitlenmiş Histogram')
+        plt.xlabel('Piksel Değeri')
+        plt.ylabel('Piksel Sayısı')
+        plt.grid(True)
+        
+        plt.tight_layout()
+        plt.show()
 
     def thresholding(self):
         if self.current_image is None:
@@ -423,6 +451,23 @@ class ImageProcessor:
         else:
             messagebox.showerror("Hata", "Lütfen önce bir görüntü yükleyin!")
 
+    def show_single_histogram(self, image):
+        """Show histogram for a single image"""
+        if image is None:
+            messagebox.showerror("Hata", "Görüntü bulunamadı!")
+            return
+            
+        plt.figure(figsize=(8,5))
+        color = ('b','g','r')
+        hists = CustomImageProcessing.calculate_histogram(image)
+        for i, (hist, col) in enumerate(zip(hists, color)):
+            plt.plot(hist, color=col)
+        plt.title('Görüntü Histogramı')
+        plt.xlabel('Piksel Değeri')
+        plt.ylabel('Piksel Sayısı')
+        plt.grid(True)
+        plt.show()
+
 class CustomImageProcessing:
     @staticmethod
     def calculate_histogram(image):
@@ -548,28 +593,48 @@ class CustomImageProcessing:
     def histogram_equalization(image):
         """Perform histogram equalization manually"""
         if len(image.shape) == 3:
-            # Process each channel separately
-            result = np.zeros_like(image)
-            for c in range(3):
-                channel = image[..., c]
-                # Calculate histogram
-                hist = np.zeros(256)
-                for i in range(channel.shape[0]):
-                    for j in range(channel.shape[1]):
-                        hist[channel[i, j]] += 1
-                        
-                # Calculate cumulative distribution
-                cdf = hist.cumsum()
-                cdf_normalized = cdf * 255 / cdf[-1]
-                
-                # Apply equalization
-                for i in range(channel.shape[0]):
-                    for j in range(channel.shape[1]):
-                        result[i, j, c] = cdf_normalized[channel[i, j]]
-                        
+            # Convert to YCrCb color space
+            # First convert to float for accurate calculations
+            img_float = image.astype(float)
+            
+            # Convert to YCrCb-like colorspace manually
+            Y = 0.299 * img_float[..., 2] + 0.587 * img_float[..., 1] + 0.114 * img_float[..., 0]
+            Cr = 128 + 0.5 * img_float[..., 2] - 0.419 * img_float[..., 1] - 0.081 * img_float[..., 0]
+            Cb = 128 - 0.169 * img_float[..., 2] - 0.332 * img_float[..., 1] + 0.5 * img_float[..., 0]
+            
+            # Equalize the Y (luminance) channel
+            # Calculate histogram
+            hist, _ = np.histogram(Y.flatten(), 256, [0, 256])
+            
+            # Calculate cumulative distribution function
+            cdf = hist.cumsum()
+            
+            # Normalize the CDF
+            cdf_normalized = np.round(((cdf - cdf.min()) * 255) / (cdf.max() - cdf.min()))
+            
+            # Apply equalization to Y channel
+            Y_eq = cdf_normalized[Y.astype(np.uint8)]
+            
+            # Convert back to RGB-like colorspace
+            R = Y_eq + 1.403 * (Cr - 128)
+            G = Y_eq - 0.714 * (Cr - 128) - 0.344 * (Cb - 128)
+            B = Y_eq + 1.773 * (Cb - 128)
+            
+            # Clip values to [0, 255] and combine channels
+            result = np.stack([
+                np.clip(B, 0, 255),
+                np.clip(G, 0, 255),
+                np.clip(R, 0, 255)
+            ], axis=-1)
+            
             return result.astype(np.uint8)
         else:
-            return np.stack([CustomImageProcessing.histogram_equalization(image)] * 3, axis=-1)
+            # For grayscale images
+            hist, _ = np.histogram(image.flatten(), 256, [0, 256])
+            cdf = hist.cumsum()
+            cdf_normalized = np.round(((cdf - cdf.min()) * 255) / (cdf.max() - cdf.min()))
+            equalized = cdf_normalized[image.astype(np.uint8)]
+            return np.stack([equalized] * 3, axis=-1).astype(np.uint8)
 
     @staticmethod
     def manual_threshold(image, threshold_value, method='binary'):
