@@ -54,3 +54,4 @@ All image processing operations are implemented from scratch without using OpenC
 - Custom edge detection using Sobel operators
 - Custom thresholding algorithms
 - Manual histogram equalization
+"# image-processing-app" 
