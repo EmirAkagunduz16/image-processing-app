@@ -1,5 +1,5 @@
 numpy>=1.21.0
-opencv-python==4.8.0
+opencv-python==4.8.0.76
 matplotlib>=3.4.0
 tkinter
 Pillow>=8.0.0 
